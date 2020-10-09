@@ -1,4 +1,5 @@
-Repository for userscript "Tweetdeck hide self retweets and blacklist retweets of accounts" available on greasyfork.org.
+Repository for userscript "Tweetdeck hide self retweets and blacklist retweets of accounts".
+Available [here](https://greasyfork.org/en/scripts/411991-tweetdeck-hide-self-retweets-and-blacklist-retweets-of-accounts). Can be installed using the browser extension tampermonkey.
 
 Based on the script YouTube Comment Blacklist by NatoBoram.
 
