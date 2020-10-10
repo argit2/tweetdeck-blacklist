@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Tweetdeck hide self retweets and blacklist retweets and replies of accounts
 // @namespace       https://github.com/argit2/tweetdeck-blacklist
-// @version         0.0.2
+// @version         0.0.3
 // @license         GPL-3.0-or-later
 // @supportURL      https://github.com/argit2/tweetdeck-blacklist
 // @description     Hide self retweets. Blacklist accounts to not see retweets of their posts. Very useful when you have a group of users that retweet each other.
