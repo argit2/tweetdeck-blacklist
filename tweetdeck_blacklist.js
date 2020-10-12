@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Tweetdeck hide self retweets and blacklist retweets and replies of accounts
 // @namespace       https://github.com/argit2/tweetdeck-blacklist
-// @version         0.0.4
+// @version         0.0.5
 // @license         GPL-3.0-or-later
 // @supportURL      https://github.com/argit2/tweetdeck-blacklist
 // @description     Hide self retweets. Blacklist accounts to not see retweets of their posts. Very useful when you have a group of users that retweet each other.
@@ -165,16 +165,30 @@ const elementToCheckForWords = ".js-tweet-text" ;
     }
 
     function filterVideos (column) {
-        // sometimes there's an array of changes, pick last one
+        // sometimes there's an array of changes (apparently corresponds to show the more elements section appearing, old tweets being removed, and new tweets being added).
+        // we pick only the added elements if possible. in many cases this doesn't make a difference
+        // because as you scroll down, tweetdeck might reload all the tweets
+        // but sometimes it won't.
+        // then for example there are 40 tweets and only 3 of them are new (actually happens)
+        // filtering only new elements reduces weird behavior
+        // example: page moving suddenly because of many tweets being hidden
+        let nodes = [];
         if (column instanceof Array) {
-            column = column[column.length - 1];
+            let addedNodes = column.map( (ele) => Array.from(ele.addedNodes.values()));
+            nodes = addedNodes.flat();
+            console.log(column[column.length - 1].target.querySelectorAll(elementToRemove).length);
+            console.log(nodes);
         }
-        // for some reason i get a mutation record??? this doesn't happen on youtube, might have to do with const
-        if (column instanceof MutationRecord)
+        // might only happen when it's an array like above, but will keep it there anyway
+        else if (column instanceof MutationRecord)
         {
-            column = column.target;
+            nodes = column.addedNodes;
+            console.log("WHOT", nodes);
         }
-        column.querySelectorAll(elementToRemove).forEach(video => {
+        else {
+            nodes = column.querySelectorAll(elementToRemove);
+        }
+        nodes.forEach(video => {
             // removes videos with blacklisted titles
             let elementWithText = video.querySelector(elementToCheckForWords);
             // Apparently sometimes a tweet has no text, only image
