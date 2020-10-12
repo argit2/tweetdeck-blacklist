@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Tweetdeck hide self retweets and blacklist retweets and replies of accounts
 // @namespace       https://github.com/argit2/tweetdeck-blacklist
-// @version         0.0.3
+// @version         0.0.4
 // @license         GPL-3.0-or-later
 // @supportURL      https://github.com/argit2/tweetdeck-blacklist
 // @description     Hide self retweets. Blacklist accounts to not see retweets of their posts. Very useful when you have a group of users that retweet each other.
@@ -184,17 +184,18 @@ const elementToCheckForWords = ".js-tweet-text" ;
                 let found = wordsInText(regexes, textContent);
                 if (found) {
                     console.log(`Removing ${found} : ${textContent}`);
-                    return video.remove();
+                    video.style.display = "none";
+                    return;
                 }
             }
 
             // removes if match custom conditions
-            let allTextContent = video.textContent.toLowerCase();
             for (const condition of customConditions) {
                 let cond = condition(video);
                 if (cond) {
                     console.log(`Removing '${cond}' : ${textContent}`);
-                    return video.remove();
+                    video.style.display = "none";
+                    return;
 
                 }
             }
