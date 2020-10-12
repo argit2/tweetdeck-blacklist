@@ -176,14 +176,11 @@ const elementToCheckForWords = ".js-tweet-text" ;
         if (column instanceof Array) {
             let addedNodes = column.map( (ele) => Array.from(ele.addedNodes.values()));
             nodes = addedNodes.flat();
-            console.log(column[column.length - 1].target.querySelectorAll(elementToRemove).length);
-            console.log(nodes);
         }
         // might only happen when it's an array like above, but will keep it there anyway
         else if (column instanceof MutationRecord)
         {
             nodes = column.addedNodes;
-            console.log("WHOT", nodes);
         }
         else {
             nodes = column.querySelectorAll(elementToRemove);
