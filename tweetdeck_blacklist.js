@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Tweetdeck hide self retweets and blacklist retweets and replies of accounts
 // @namespace       https://github.com/argit2/tweetdeck-blacklist
-// @version         0.0.5
+// @version         0.0.6
 // @license         GPL-3.0-or-later
 // @supportURL      https://github.com/argit2/tweetdeck-blacklist
 // @description     Hide self retweets. Blacklist accounts to not see retweets of their posts. Very useful when you have a group of users that retweet each other.
@@ -48,7 +48,7 @@ if (! GM_getValue("retweetBlacklist")) {
 
 let storage = GM_getValue("retweetBlacklist").map( (user) => user.toLowerCase() );
 console.log(storage);
-const retweetBlacklist = arrayToObjKeys(storage);
+var retweetBlacklist = arrayToObjKeys(storage);
 
 function linkToUsername (link) {
     let split = link.split("/");
@@ -61,8 +61,6 @@ function linkToUsername (link) {
 }
 
 const nobody = "random username that nobody will ever have";
-
-const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
 
 function whoTweeted (tweet) {
     // when you scroll for a while, tweetdeck will display "show more" instead of new tweets and there'll be no link
@@ -234,3 +232,56 @@ const elementToCheckForWords = ".js-tweet-text" ;
     }, 2000);
 
 })();
+
+/*
+ Button to add user to blacklist
+*/
+
+function updateStorage() {
+  GM_setValue("retweetBlacklist", Object.keys(retweetBlacklist));
+}
+
+function newNode(html) {
+    let div = document.createElement('div');
+    div.innerHTML = html.trim();
+    return div.firstChild;
+}
+
+let profileNode = document.querySelector("div.js-modals-container");
+function addButtonToProfile() {
+    if ( (!profileNode) || profileNode.children.length == 0) return;
+    let link = profileNode.querySelector("a.js-action-url.link-clean").getAttribute("href");
+    let user = linkToUsername(link);
+
+    function addToBlacklist(){
+        retweetBlacklist[user] = "";
+        updateStorage();
+        console.log("Added user", user, "to blacklist.");
+    }
+
+    function removeFromBlacklist() {
+        delete retweetBlacklist[user];
+        updateStorage();
+        console.log("Removed user", user, "from blacklist");
+    }
+
+    let button = newNode (`
+        <button class="btn-on-dark">
+        <span class="label">Block replies and self retweets.</span>
+        </button>
+        `);
+    button.onclick = addToBlacklist;
+    if (user in retweetBlacklist) {
+            button = newNode(`
+                <button class="btn-on-dark" onclick="removeFromBlacklist(${user})">
+                <span class="label">Unblock replies and self retweets.</span>
+                </button>
+                `);
+            button.onclick = removeFromBlacklist;
+    }
+    let parentNode = profileNode.querySelector("div.prf-actions");
+    let childNode = parentNode.querySelector("div.js-social-proof.social-proof-container");
+    parentNode.insertBefore(button, childNode);
+}
+
+new MutationObserver(addButtonToProfile).observe(profileNode, { childList: true});
