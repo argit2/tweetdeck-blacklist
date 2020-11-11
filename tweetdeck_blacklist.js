@@ -51,10 +51,14 @@ const arrayToObjKeys = (arr) => {
 if (! GM_getValue("retweetBlacklist")) {
   GM_setValue("retweetBlacklist", ["exampleaccount1", "exampleaccount2"]);
 }
+if (! GM_getValue("mutedWordByUser")) {
+  GM_setValue("mutedWordByUser", {"exampleAccount1" : ["mutedword1", "mutedword2"]});
+}
 
 let storage = GM_getValue("retweetBlacklist").map( (user) => user.toLowerCase() );
 console.log(storage);
 var retweetBlacklist = arrayToObjKeys(storage);
+var mutedWordByUser = GM_getValue("mutedWordByUser");
 
 function linkToUsername (link) {
     let split = link.split("/");
@@ -67,6 +71,16 @@ function linkToUsername (link) {
 }
 
 const nobody = "random username that nobody will ever have";
+
+function tweetContent (tweet) {
+    let elementWithText = tweet.querySelector(elementToCheckForWords);
+            // Apparently sometimes a tweet has no text, only image
+    let textContent = "";
+    if (elementWithText) {
+        textContent = elementWithText.textContent.toLowerCase();
+    }
+    return textContent;
+}
 
 function whoTweeted (tweet) {
     // when you scroll for a while, tweetdeck will display "show more" instead of new tweets and there'll be no link
@@ -109,6 +123,22 @@ function whoReplied (tweet) {
     return reply.innerText.substring(1);
 }
 
+
+function tweetInfo(tweet) {
+    // this is pain, i had a similar function that corrected who was the user and who was the replier, but i lost it. lazy to do it now. will keep the usual values.
+    let user = whoTweeted(tweet);
+    let retweeter = whoRetweeted(tweet);
+    let replier = whoReplied(tweet);
+    let content = tweetContent(tweet);
+    let info = {
+        "user" : user,
+        "retweeter" : retweeter ,
+        "replier" : replier,
+        "content" : content,
+    };
+    return info;
+}
+
 function inBlacklist (tweet) {
 
     let user = whoTweeted(tweet);
@@ -136,10 +166,40 @@ function isSelfRetweet (tweet) {
     return false
 };
 
+function hasMutedWordByUser (tweet) {
+    let info = tweetInfo(tweet);
+    let mutedWords = mutedWordByUser[info.user];
+    if (info.content && mutedWords) {
+        let word = wordsInText(mutedWords, info.content);
+        if (word) {
+            return 'word ' + word + ' for user' + info.user;
+        }
+    }
+    return false;
+}
+
 const customConditions = [
    isSelfRetweet,
    inBlacklist,
+   hasMutedWordByUser
 ];
+
+
+function wordsInText (regs, text) {
+    let word = ""
+    let found = (regs.some( (reg, index) => {
+        word = reg.toString();
+        // easier than checking if is string
+        if (! (reg instanceof RegExp)) {
+            return (new RegExp(reg).test(text));
+        }
+        return reg.test(text);
+    }))
+    if (found) {
+        return word;
+    }
+    return false;
+}
 
 const elementToObserve = "div.js-chirp-container" ; // columns
 const elementToRemove = "article.stream-item" ; // tweet
@@ -148,27 +208,11 @@ const elementToCheckForWords = ".js-tweet-text" ;
 (() => {
     "use strict";
 
-
-    const regexes = bannedWords.map( (word) => {return new RegExp(`(?<![a-zA-Z])${word}(?![a-zA-Z])`)} );
-    //console.log(regexes);
-    //var lastSection = 0;
-
-    // returns true if any of the words is in the text alone
+    // so we can check if words are in the text alone
     // example: will match only "vlog" alone but not "devvlog" because not alone
-    function wordsInText (regs, text) {
-        let word = ""
-        let found = (regs.some( (reg, index) => {
-            //console.log(reg, text, reg.test(text))
-            word = bannedWords[index];
-            return reg.test(text);
-        }))
-        if (found) {
-            return word;
-        }
-        return false;
-    }
+    const regexes = bannedWords.map( (word) => {return new RegExp(`(?<![a-zA-Z])${word}(?![a-zA-Z])`)} );
 
-    function filterVideos (column) {
+    function filterTweets (column) {
         // sometimes there's an array of changes (apparently corresponds to show the more elements section appearing, old tweets being removed, and new tweets being added).
         // we pick only the added elements if possible. in many cases this doesn't make a difference
         // because as you scroll down, tweetdeck might reload all the tweets
@@ -189,27 +233,23 @@ const elementToCheckForWords = ".js-tweet-text" ;
         else {
             nodes = column.querySelectorAll(elementToRemove);
         }
-        nodes.forEach(video => {
-            // removes videos with blacklisted titles
-            let elementWithText = video.querySelector(elementToCheckForWords);
-            // Apparently sometimes a tweet has no text, only image
-            let textContent = "";
-            if (elementWithText) {
-                textContent = elementWithText.textContent.toLowerCase();
+        nodes.forEach(tweet => {
+            let textContent = tweetContent(tweet);
+            if (textContent) {
                 let found = wordsInText(regexes, textContent);
                 if (found) {
                     console.log(`Removing ${found} : ${textContent}`);
-                    video.style.display = "none";
+                    tweet.style.display = "none";
                     return;
                 }
             }
 
             // removes if match custom conditions
             for (const condition of customConditions) {
-                let cond = condition(video);
+                let cond = condition(tweet);
                 if (cond) {
                     console.log(`Removing '${cond}' : ${textContent}`);
-                    video.style.display = "none";
+                    tweet.style.display = "none";
                     return;
 
                 }
@@ -232,8 +272,8 @@ const elementToCheckForWords = ".js-tweet-text" ;
         // observes new sections of videos being added to the subscription page
         // and removes videos that have blacklisted words
         for (const column of videos) {
-            filterVideos(column);
-            new MutationObserver(filterVideos).observe(column, { childList: true});
+            filterTweets(column);
+            new MutationObserver(filterTweets).observe(column, { childList: true});
         }
     }, 2000);
 
