@@ -33,32 +33,83 @@ const bannedWords = [
 ];
 
 // returns a new object with the values at each key mapped using mapFn(value)
-const objectMap = (obj, fn) => {
-  Object.fromEntries(
+function objectMap (obj, fn) {
+  return Object.fromEntries(
     Object.entries(obj).map(
       ([k, v], i) => [k, fn(v, k, i)]
     )
   )};
 
-const arrayToObjKeys = (arr) => {
+function objectKeysMap(obj, fn) {
+  return Object.fromEntries(
+    Object.entries(obj).map(
+      ([k, v], i) => [fn(k), v]
+    )
+  )};
+
+function objectKeysToLowerCase(obj) {
+   return objectKeysMap(obj, x => x.toLowerCase());
+}
+
+function arrayToObjKeys (arr) {
     return arr.reduce( (a, b) => {
         a[b] = '';
         return (a[b], a)
     }, {});
 }
 
-// initializes storage if not initialized yet
-if (! GM_getValue("retweetBlacklist")) {
-  GM_setValue("retweetBlacklist", ["exampleaccount1", "exampleaccount2"]);
-}
-if (! GM_getValue("mutedWordByUser")) {
-  GM_setValue("mutedWordByUser", {"exampleAccount1" : ["mutedword1", "mutedword2"]});
+function wordsInText (regs, text) {
+    let word = ""
+    let found = (regs.some( (reg, index) => {
+        word = reg.toString();
+        // easier than checking if is string
+        if (! (reg instanceof RegExp)) {
+            return (new RegExp(reg).test(text));
+        }
+        return reg.test(text);
+    }))
+    if (found) {
+        return word;
+    }
+    return false;
 }
 
-let storage = GM_getValue("retweetBlacklist").map( (user) => user.toLowerCase() );
-console.log(storage);
-var retweetBlacklist = arrayToObjKeys(storage);
-var mutedWordByUser = GM_getValue("mutedWordByUser");
+const defaultStorage = {
+    "retweetBlacklist" : ["exampleaccount1", "exampleaccount2"],
+    "mutedWordByUser" : {"exampleAccount1" : ["mutedword1", "mutedword2"]},
+    "mediaOnlyUsers" : ["exampleAccount1", "exampleAccount2"]
+}
+
+// initializes storage if not initialized yet
+Object.keys(defaultStorage).forEach( k => {
+    if (! GM_getValue(k)) {
+        GM_setValue(k, defaultStorage[k]);
+    }
+})
+
+function getStorageValue(name) {
+    let stored = GM_getValue(name);
+    console.log(name, stored);
+    if (stored instanceof Array) {
+        let lowercase = stored.map( (user) => user.toLowerCase() );
+        return arrayToObjKeys(lowercase);
+    }
+    // is object
+    return objectKeysToLowerCase(stored);
+}
+
+function getStorage() {
+    let storage = {};
+    Object.keys(defaultStorage).forEach ( k => {
+        storage[k] = getStorageValue(k)
+    });
+    return storage;
+}
+
+var retweetBlacklist = getStorageValue("retweetBlacklist");
+var mutedWordByUser = getStorageValue("mutedWordByUser");
+var mediaOnlyUsers = getStorageValue("mediaOnlyUsers");
+var storage = getStorage;
 
 function linkToUsername (link) {
     let split = link.split("/");
@@ -123,7 +174,6 @@ function whoReplied (tweet) {
     return reply.innerText.substring(1);
 }
 
-
 function tweetInfo(tweet) {
     // this is pain, i had a similar function that corrected who was the user and who was the replier, but i lost it. lazy to do it now. will keep the usual values.
     let user = whoTweeted(tweet);
@@ -172,34 +222,26 @@ function hasMutedWordByUser (tweet) {
     if (info.content && mutedWords) {
         let word = wordsInText(mutedWords, info.content);
         if (word) {
-            return 'word ' + word + ' for user' + info.user;
+            return 'word ' + word + ' for user ' + info.user;
         }
     }
     return false;
+}
+
+function isTextByMediaOnlyUser (tweet) {
+    let info = tweetInfo(tweet);
+    let mediaStrings = ["t.co/", "pic.twitter.com"]
+    if (info.user in mediaOnlyUsers && (! wordsInText(mediaStrings, info.content))) {
+        return 'non-media tweet for user ' + info.user;
+    }
 }
 
 const customConditions = [
    isSelfRetweet,
    inBlacklist,
-   hasMutedWordByUser
+   hasMutedWordByUser,
+   isTextByMediaOnlyUser
 ];
-
-
-function wordsInText (regs, text) {
-    let word = ""
-    let found = (regs.some( (reg, index) => {
-        word = reg.toString();
-        // easier than checking if is string
-        if (! (reg instanceof RegExp)) {
-            return (new RegExp(reg).test(text));
-        }
-        return reg.test(text);
-    }))
-    if (found) {
-        return word;
-    }
-    return false;
-}
 
 const elementToObserve = "div.js-chirp-container" ; // columns
 const elementToRemove = "article.stream-item" ; // tweet
