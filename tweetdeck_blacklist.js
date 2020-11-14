@@ -112,6 +112,7 @@ var mediaOnlyUsers = getStorageValue("mediaOnlyUsers");
 var storage = getStorage;
 
 function linkToUsername (link) {
+    if (! link) return "";
     let split = link.split("/");
     let last = split[split.length - 1];
     // link ends in /, example twitter.com/whateveruser/
@@ -321,9 +322,92 @@ const elementToCheckForWords = ".js-tweet-text" ;
 
 })();
 
+// State management https://github.com/MaiaVictor/PureState/
+var PureState = (function(){
+  var captured_deps = [];
+  var capturing_deps = false;
+
+  // Refreshes the value of a node.
+  function refresh(node){
+    // Gathers the values that this node depend on
+    // and calls its compute() function with them.
+    var depended_values = [];
+    for (var i=0; i<node.dependencies.length; ++i)
+      depended_values.push(node.dependencies[i].value);
+    node.value = node.compute.apply(null, depended_values);
+
+    // Refresh each node that depends on this one.
+    for (var i=0; i<node.depended_by.length; ++i)
+      refresh(node.depended_by[i]);
+  };
+
+  // To build a stateful value, you must provide either
+  // the initial state (a JS value) or a computed state,
+  // i.e., a function that uses other stateful values.
+  function state(compute){
+    // This sets the compute function of the node, i.e., the function that is
+    // used to compute a state value in function of other states.  A
+    // non-computed state is actually a computed state where the computing
+    // function has no arguments, so we wrap such function around the value.
+    function wrap_function(compute){
+      if (typeof compute !== "function")
+        return function(){ return compute; };
+      else
+        return compute;
+    };
+    node.compute = wrap_function(compute);
+
+    // The state object can be called with or without an argument. If it is
+    // called without an argument, it just returns its value. If it is caleld
+    // with an argument, it refreshes the computing function of that state and
+    // returns the new value.
+    function node(new_compute){
+      // If we are in the variable capture phase (ref below), then we push this
+      // node to the `capture_deps` array.
+      if (capturing_deps)
+        captured_deps.push(node);
+      // Otherwise, we do what was described above.
+      if (new_compute !== undefined){
+        node.compute = wrap_function(new_compute);
+        refresh(node);
+      };
+      return node.value;
+    }
+
+    // The variable capture phase is a little small hack that allows us not to
+    // need to specify a list of dependencies for a computed function. It works
+    // by globally changing the behavior of every state object so that, instead
+    // of doing what it does (get/set its state), it just reports its existence
+    // to a dependency collector array. This looks ugly in code, but can be
+    // seen as a workaround for a language limitation. It is mostly innofensive
+    // and avoids a lot of boilerplate.
+    node.depended_by = [];
+    captured_deps = [];
+    capturing_deps = true;
+    node.compute();
+    capturing_deps = false;
+    node.dependencies = captured_deps;
+    for (var i=0; i<captured_deps.length; ++i)
+      captured_deps[i].depended_by.push(node);
+
+    // When the node is properly built, we just bootstrap its initial value by
+    // refreshing it. This avoids a little code duplication.
+    refresh(node);
+
+    return node;
+  };
+
+  return state;
+})();
+
+const state = PureState;
+
+
 /*
  Button to add user to blacklist
 */
+
+// AUX
 
 function updateStorage() {
   GM_setValue("retweetBlacklist", Object.keys(retweetBlacklist));
@@ -336,40 +420,117 @@ function newNode(html) {
 }
 
 let profileNode = document.querySelector("div.js-modals-container");
-function addButtonToProfile() {
-    if ( (!profileNode) || profileNode.children.length == 0) return;
+
+// MODEL
+
+let user = state("");
+// making the model depend on the storage variables
+// so we alter the storage variables and the model changes
+let block_replies = state(() => user() in retweetBlacklist);
+let media_only = state(() => user() in mediaOnlyUsers);
+
+function get_profile_user() {
+    if ( (!profileNode) || profileNode.children.length == 0) return "";
+    let link = profileNode.querySelector("a.js-action-url.link-clean").getAttribute("href");
+    let user = linkToUsername(link);
+    return user;
+}
+
+function initialize_model() {
+    user(get_profile_user());
+}
+
+// UPDATE
+
+function genericAdd(dict) {
+    dict[user()] = "";
+    updateStorage();
+    refresh();
+}
+
+function genericRemove(dict) {
+    delete dict[user()];
+    updateStorage();
+    refresh();
+}
+
+function addToMediaOnly(){
+    genericAdd(mediaOnlyUsers);
+    console.log("Block text only posts from ", user());
+}
+
+function removeFromMediaOnly() {
+    genericRemove(mediaOnlyUsers);
+    console.log("Unblocked text only posts from ", user());
+}
+
+function addToBlacklist(){
+    genericAdd(retweetBlacklist);
+    console.log("Added user", user(), "to blacklist");
+}
+
+function removeFromBlacklist() {
+    genericRemove(retweetBlacklist);
+    console.log("Removed user", user(), "from blacklist");
+}
+
+// VIEW
+
+function generic_button (state_function, yes_text, no_text, yes_fn, no_fn) {
+    // using nodes just to be able to set onclick in a way that works with tampermonkey
+    let button = newNode (`
+        <button class="btn-on-dark">
+        <span class="label">${no_text}</span>
+        </button>
+        `);
+    button.onclick = no_fn;
+    if (state_function()) {
+        button = newNode (`
+        <button class="btn-on-dark">
+        <span class="label">${yes_text}</span>
+        </button>
+        `);
+        button.onclick = yes_fn;
+    }
+    return button;
+}
+
+// when a function is passed to state, state will execute the function to get an initial value.
+// executing button() will also execute the function
+// so i passed a function just to be able to pass arguments to generic_button
+let button_block_replies = state(() => generic_button(block_replies, "Unblock replies and self retweets", "Block replies and self retweets", removeFromBlacklist, addToBlacklist));
+let button_media_only = state(() => generic_button(media_only, "Unblock text posts", "Block text posts", removeFromMediaOnly, addToMediaOnly));
+
+let buttons = [button_block_replies, button_media_only];
+
+// APP
+
+function add_div_profile () {
+    if ( (!profileNode) || profileNode.children.length == 0) return "";
     let link = profileNode.querySelector("a.js-action-url.link-clean").getAttribute("href");
     let user = linkToUsername(link);
 
-    function addToBlacklist(){
-        retweetBlacklist[user] = "";
-        updateStorage();
-        console.log("Added user", user, "to blacklist.");
-    }
-
-    function removeFromBlacklist() {
-        delete retweetBlacklist[user];
-        updateStorage();
-        console.log("Removed user", user, "from blacklist");
-    }
-
-    let button = newNode (`
-        <button class="btn-on-dark">
-        <span class="label">Block replies and self retweets.</span>
-        </button>
-        `);
-    button.onclick = addToBlacklist;
-    if (user in retweetBlacklist) {
-            button = newNode(`
-                <button class="btn-on-dark" onclick="removeFromBlacklist(${user})">
-                <span class="label">Unblock replies and self retweets.</span>
-                </button>
-                `);
-            button.onclick = removeFromBlacklist;
-    }
+    let div = newNode(`<div id='tweetdeck-suite'><div>`)
     let parentNode = profileNode.querySelector("div.prf-actions");
     let childNode = parentNode.querySelector("div.js-social-proof.social-proof-container");
-    parentNode.insertBefore(button, childNode);
+    parentNode.insertBefore(div, childNode);
+    return div;
+};
+
+function app () {
+    let div = document.querySelector("div#tweetdeck-suite");
+    if (!div) return;
+    initialize_model();
+    div.textContent = "";
+    buttons.forEach (button => div.append(button()));
 }
 
-new MutationObserver(addButtonToProfile).observe(profileNode, { childList: true});
+function initialize_profile () {
+    add_div_profile();
+    app();
+}
+
+// refresh is the app which is a function that sets the content of the div to the view. the app updates by recalling the function
+var refresh = app;
+
+new MutationObserver(initialize_profile).observe(profileNode, { childList: true});
