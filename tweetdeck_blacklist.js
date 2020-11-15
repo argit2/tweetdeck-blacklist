@@ -75,9 +75,11 @@ function wordsInText (regs, text) {
 }
 
 const defaultStorage = {
-    "retweetBlacklist" : ["exampleaccount1", "exampleaccount2"],
-    "mutedWordByUser" : {"exampleAccount1" : ["mutedword1", "mutedword2"]},
-    "mediaOnlyUsers" : ["exampleAccount1", "exampleAccount2"]
+    "retweetBlacklist" : [],
+    // {"exampleAccount1" : ["mutedword1", "mutedword2"]}
+    "mutedWordByUser" : {},
+    "mediaOnlyUsers" : [],
+    "noRetweet" : []
 }
 
 // initializes storage if not initialized yet
@@ -106,10 +108,17 @@ function getStorage() {
     return storage;
 }
 
-var retweetBlacklist = getStorageValue("retweetBlacklist");
-var mutedWordByUser = getStorageValue("mutedWordByUser");
-var mediaOnlyUsers = getStorageValue("mediaOnlyUsers");
-var storage = getStorage;
+function updateStorage() {
+    Object.keys(storage).forEach (k => {
+        let value = storage[k];
+        if (defaultStorage[k] instanceof Array) {
+            value = Object.keys(storage[k]);
+        }
+        GM_setValue(k, value);
+    })
+}
+
+var storage = getStorage();
 
 function linkToUsername (link) {
     if (! link) return "";
@@ -196,12 +205,12 @@ function inBlacklist (tweet) {
     let retweeter = whoRetweeted(tweet);
     let replier = whoReplied(tweet);
 
-    let replyCondition = replier && (user in retweetBlacklist || replier in retweetBlacklist);
+    let replyCondition = replier && (user in storage.retweetBlacklist || replier in retweetBlacklist);
     if (replyCondition) {
         return replier + ' replied to ' + user;
     }
 
-    let retweetCondition = retweeter && user in retweetBlacklist;
+    let retweetCondition = retweeter && user in storage.retweetBlacklist;
     if (retweetCondition) {
         return retweeter + ' retweeted ' + user;
     }
@@ -219,7 +228,7 @@ function isSelfRetweet (tweet) {
 
 function hasMutedWordByUser (tweet) {
     let info = tweetInfo(tweet);
-    let mutedWords = mutedWordByUser[info.user];
+    let mutedWords = storage.mutedWordByUser[info.user];
     if (info.content && mutedWords) {
         let word = wordsInText(mutedWords, info.content);
         if (word) {
@@ -232,8 +241,15 @@ function hasMutedWordByUser (tweet) {
 function isTextByMediaOnlyUser (tweet) {
     let info = tweetInfo(tweet);
     let mediaStrings = ["t.co/", "pic.twitter.com"]
-    if (info.user in mediaOnlyUsers && (! wordsInText(mediaStrings, info.content))) {
+    if (info.user in storage.mediaOnlyUsers && (! wordsInText(mediaStrings, info.content))) {
         return 'non-media tweet for user ' + info.user;
+    }
+}
+
+function isNoRetweetUser (tweet) {
+    let info = tweetInfo(tweet);
+    if (info.retweeter in storage.noRetweet) {
+        return 'retweet from user' + info.retweeter;
     }
 }
 
@@ -241,7 +257,8 @@ const customConditions = [
    isSelfRetweet,
    inBlacklist,
    hasMutedWordByUser,
-   isTextByMediaOnlyUser
+   isTextByMediaOnlyUser,
+   isNoRetweetUser
 ];
 
 const elementToObserve = "div.js-chirp-container" ; // columns
@@ -409,10 +426,6 @@ const state = PureState;
 
 // AUX
 
-function updateStorage() {
-  GM_setValue("retweetBlacklist", Object.keys(retweetBlacklist));
-}
-
 function newNode(html) {
     let div = document.createElement('div');
     div.innerHTML = html.trim();
@@ -426,8 +439,9 @@ let profileNode = document.querySelector("div.js-modals-container");
 let user = state("");
 // making the model depend on the storage variables
 // so we alter the storage variables and the model changes
-let block_replies = state(() => user() in retweetBlacklist);
-let media_only = state(() => user() in mediaOnlyUsers);
+let block_replies = state(() => user() in storage.retweetBlacklist);
+let media_only = state(() => user() in storage.mediaOnlyUsers);
+let no_retweet = state(() => user() in storage.noRetweet);
 
 function get_profile_user() {
     if ( (!profileNode) || profileNode.children.length == 0) return "";
@@ -455,24 +469,35 @@ function genericRemove(dict) {
 }
 
 function addToMediaOnly(){
-    genericAdd(mediaOnlyUsers);
+    genericAdd(storage.mediaOnlyUsers);
     console.log("Block text only posts from ", user());
 }
 
 function removeFromMediaOnly() {
-    genericRemove(mediaOnlyUsers);
+    genericRemove(storage.mediaOnlyUsers);
     console.log("Unblocked text only posts from ", user());
 }
 
 function addToBlacklist(){
-    genericAdd(retweetBlacklist);
+    genericAdd(storage.retweetBlacklist);
     console.log("Added user", user(), "to blacklist");
 }
 
 function removeFromBlacklist() {
-    genericRemove(retweetBlacklist);
+    genericRemove(storage.retweetBlacklist);
     console.log("Removed user", user(), "from blacklist");
 }
+
+function blockRetweet(){
+    genericAdd(storage.noRetweet);
+    console.log("Blocked user", user(), "from retweeting");
+}
+
+function unblockRetweet() {
+    genericRemove(storage.noRetweet);
+    console.log("Unblocked user", user(), "from retweeting");
+}
+
 
 // VIEW
 
@@ -500,8 +525,9 @@ function generic_button (state_function, yes_text, no_text, yes_fn, no_fn) {
 // so i passed a function just to be able to pass arguments to generic_button
 let button_block_replies = state(() => generic_button(block_replies, "Unblock replies and self retweets", "Block replies and self retweets", removeFromBlacklist, addToBlacklist));
 let button_media_only = state(() => generic_button(media_only, "Unblock text posts", "Block text posts", removeFromMediaOnly, addToMediaOnly));
+let button_no_retweet = state(() => generic_button(no_retweet, "Unblock from retweeting", "Block from retweeting", unblockRetweet, blockRetweet));
 
-let buttons = [button_block_replies, button_media_only];
+let buttons = [button_block_replies, button_media_only, button_no_retweet];
 
 // APP
 
