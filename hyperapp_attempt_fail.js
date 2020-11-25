@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name            Tweetdeck hide self retweets and more
+// @name            Tweetdeck hide self retweets and blacklist retweets and replies of accounts
 // @namespace       https://github.com/argit2/tweetdeck-blacklist
-// @version         0.0.8
+// @version         0.0.6
 // @license         GPL-3.0-or-later
 // @supportURL      https://github.com/argit2/tweetdeck-blacklist
 // @description     Hide self retweets. Blacklist accounts to not see retweets of their posts. Very useful when you have a group of users that retweet each other.
@@ -13,9 +13,7 @@
 
 /* INSTRUCTIONS
 
-Self retweets are blocked by default
-
-Click on a user on tweetdeck to access the user profile. The button to add or remove from lists will be there.
+Click on a user on tweetdeck to access the user profile. The button to add or remove from list will be there.
 
 You can see and modify the full list of users by doing this:
 
@@ -341,85 +339,430 @@ const elementToCheckForWords = ".js-tweet-text" ;
 
 })();
 
-// State management https://github.com/MaiaVictor/PureState/
-var PureState = (function(){
-  var captured_deps = [];
-  var capturing_deps = false;
+// Framework https://github.com/jorgebucaran/hyperapp/
 
-  // Refreshes the value of a node.
-  function refresh(node){
-    // Gathers the values that this node depend on
-    // and calls its compute() function with them.
-    var depended_values = [];
-    for (var i=0; i<node.dependencies.length; ++i)
-      depended_values.push(node.dependencies[i].value);
-    node.value = node.compute.apply(null, depended_values);
+var SSR_NODE = 1
+var EMPTY_ARR = []
+var TEXT_NODE = 3
+var EMPTY_OBJ = {}
+var SVG_NS = "http://www.w3.org/2000/svg"
 
-    // Refresh each node that depends on this one.
-    for (var i=0; i<node.depended_by.length; ++i)
-      refresh(node.depended_by[i]);
-  };
+var id = (a) => a
+var map = EMPTY_ARR.map
+var isArray = Array.isArray
+var enqueue =
+  typeof requestAnimationFrame !== "undefined"
+    ? requestAnimationFrame
+    : setTimeout
 
-  // To build a stateful value, you must provide either
-  // the initial state (a JS value) or a computed state,
-  // i.e., a function that uses other stateful values.
-  function state(compute){
-    // This sets the compute function of the node, i.e., the function that is
-    // used to compute a state value in function of other states.  A
-    // non-computed state is actually a computed state where the computing
-    // function has no arguments, so we wrap such function around the value.
-    function wrap_function(compute){
-      if (typeof compute !== "function")
-        return function(){ return compute; };
-      else
-        return compute;
-    };
-    node.compute = wrap_function(compute);
+var createClass = (obj) => {
+  var out = ""
 
-    // The state object can be called with or without an argument. If it is
-    // called without an argument, it just returns its value. If it is caleld
-    // with an argument, it refreshes the computing function of that state and
-    // returns the new value.
-    function node(new_compute){
-      // If we are in the variable capture phase (ref below), then we push this
-      // node to the `capture_deps` array.
-      if (capturing_deps)
-        captured_deps.push(node);
-      // Otherwise, we do what was described above.
-      if (new_compute !== undefined){
-        node.compute = wrap_function(new_compute);
-        refresh(node);
-      };
-      return node.value;
+  if (typeof obj === "string") return obj
+
+  if (isArray(obj)) {
+    for (var k = 0, tmp; k < obj.length; k++) {
+      if ((tmp = createClass(obj[k]))) {
+        out += (out && " ") + tmp
+      }
+    }
+  } else {
+    for (var k in obj) {
+      if (obj[k]) out += (out && " ") + k
+    }
+  }
+
+  return out
+}
+
+var shouldRestart = (a, b) => {
+  for (var k in { ...a, ...b }) {
+    if (typeof (isArray((b[k] = a[k])) ? b[k][0] : b[k]) === "function") {
+    } else if (a[k] !== b[k]) return true
+  }
+}
+
+var patchSubs = (oldSubs, newSubs, dispatch) => {
+  for (
+    var subs = [], i = 0, oldSub, newSub;
+    i < oldSubs.length || i < newSubs.length;
+    i++
+  ) {
+    oldSub = oldSubs[i]
+    newSub = newSubs[i]
+
+    subs.push(
+      newSub && newSub !== true
+        ? !oldSub ||
+          newSub[0] !== oldSub[0] ||
+          shouldRestart(newSub[1], oldSub[1])
+          ? [
+              newSub[0],
+              newSub[1],
+              newSub[0](dispatch, newSub[1]),
+              oldSub && oldSub[2](),
+            ]
+          : oldSub
+        : oldSub && oldSub[2]()
+    )
+  }
+  return subs
+}
+
+var getKey = (vdom) => (vdom == null ? vdom : vdom.key)
+
+var patchProperty = (node, key, oldValue, newValue, listener, isSvg) => {
+  if (key === "key") {
+  } else if (key === "style") {
+    for (var k in { ...oldValue, ...newValue }) {
+      oldValue = newValue == null || newValue[k] == null ? "" : newValue[k]
+      if (k[0] === "-") {
+        node[key].setProperty(k, oldValue)
+      } else {
+        node[key][k] = oldValue
+      }
+    }
+  } else if (key[0] === "o" && key[1] === "n") {
+    if (!((node.tag || (node.tag = {}))[(key = key.slice(2))] = newValue)) {
+      node.removeEventListener(key, listener)
+    } else if (!oldValue) {
+      node.addEventListener(key, listener)
+    }
+  } else if (!isSvg && key !== "list" && key !== "form" && key in node) {
+    node[key] = newValue == null ? "" : newValue
+  } else if (
+    newValue == null ||
+    newValue === false ||
+    (key === "class" && !(newValue = createClass(newValue)))
+  ) {
+    node.removeAttribute(key)
+  } else {
+    node.setAttribute(key, newValue)
+  }
+}
+
+var createNode = (vdom, listener, isSvg) => {
+  var props = vdom.props
+  var node =
+    vdom.tag === TEXT_NODE
+      ? document.createTextNode(vdom.type)
+      : (isSvg = isSvg || vdom.type === "svg")
+      ? document.createElementNS(SVG_NS, vdom.type, { is: props.is })
+      : document.createElement(vdom.type, { is: props.is })
+
+  for (var k in props) {
+    patchProperty(node, k, null, props[k], listener, isSvg)
+  }
+
+  for (var i = 0; i < vdom.children.length; i++) {
+    node.appendChild(
+      createNode(
+        (vdom.children[i] = maybeVNode(vdom.children[i])),
+        listener,
+        isSvg
+      )
+    )
+  }
+
+  return (vdom.node = node)
+}
+
+var patch = (parent, node, oldVNode, newVNode, listener, isSvg) => {
+  if (oldVNode === newVNode) {
+  } else if (
+    oldVNode != null &&
+    oldVNode.tag === TEXT_NODE &&
+    newVNode.tag === TEXT_NODE
+  ) {
+    if (oldVNode.type !== newVNode.type) node.nodeValue = newVNode.type
+  } else if (oldVNode == null || oldVNode.type !== newVNode.type) {
+    node = parent.insertBefore(
+      createNode((newVNode = maybeVNode(newVNode)), listener, isSvg),
+      node
+    )
+    if (oldVNode != null) {
+      parent.removeChild(oldVNode.node)
+    }
+  } else {
+    var tmpVKid
+    var oldVKid
+
+    var oldKey
+    var newKey
+
+    var oldProps = oldVNode.props
+    var newProps = newVNode.props
+
+    var oldVKids = oldVNode.children
+    var newVKids = newVNode.children
+
+    var oldHead = 0
+    var newHead = 0
+    var oldTail = oldVKids.length - 1
+    var newTail = newVKids.length - 1
+
+    isSvg = isSvg || newVNode.type === "svg"
+
+    for (var i in { ...oldProps, ...newProps }) {
+      if (
+        (i === "value" || i === "selected" || i === "checked"
+          ? node[i]
+          : oldProps[i]) !== newProps[i]
+      ) {
+        patchProperty(node, i, oldProps[i], newProps[i], listener, isSvg)
+      }
     }
 
-    // The variable capture phase is a little small hack that allows us not to
-    // need to specify a list of dependencies for a computed function. It works
-    // by globally changing the behavior of every state object so that, instead
-    // of doing what it does (get/set its state), it just reports its existence
-    // to a dependency collector array. This looks ugly in code, but can be
-    // seen as a workaround for a language limitation. It is mostly innofensive
-    // and avoids a lot of boilerplate.
-    node.depended_by = [];
-    captured_deps = [];
-    capturing_deps = true;
-    node.compute();
-    capturing_deps = false;
-    node.dependencies = captured_deps;
-    for (var i=0; i<captured_deps.length; ++i)
-      captured_deps[i].depended_by.push(node);
+    while (newHead <= newTail && oldHead <= oldTail) {
+      if (
+        (oldKey = getKey(oldVKids[oldHead])) == null ||
+        oldKey !== getKey(newVKids[newHead])
+      ) {
+        break
+      }
 
-    // When the node is properly built, we just bootstrap its initial value by
-    // refreshing it. This avoids a little code duplication.
-    refresh(node);
+      patch(
+        node,
+        oldVKids[oldHead].node,
+        oldVKids[oldHead],
+        (newVKids[newHead] = maybeVNode(
+          newVKids[newHead++],
+          oldVKids[oldHead++]
+        )),
+        listener,
+        isSvg
+      )
+    }
 
-    return node;
-  };
+    while (newHead <= newTail && oldHead <= oldTail) {
+      if (
+        (oldKey = getKey(oldVKids[oldTail])) == null ||
+        oldKey !== getKey(newVKids[newTail])
+      ) {
+        break
+      }
 
-  return state;
-})();
+      patch(
+        node,
+        oldVKids[oldTail].node,
+        oldVKids[oldTail],
+        (newVKids[newTail] = maybeVNode(
+          newVKids[newTail--],
+          oldVKids[oldTail--]
+        )),
+        listener,
+        isSvg
+      )
+    }
 
-const state = PureState;
+    if (oldHead > oldTail) {
+      while (newHead <= newTail) {
+        node.insertBefore(
+          createNode(
+            (newVKids[newHead] = maybeVNode(newVKids[newHead++])),
+            listener,
+            isSvg
+          ),
+          (oldVKid = oldVKids[oldHead]) && oldVKid.node
+        )
+      }
+    } else if (newHead > newTail) {
+      while (oldHead <= oldTail) {
+        node.removeChild(oldVKids[oldHead++].node)
+      }
+    } else {
+      for (var keyed = {}, newKeyed = {}, i = oldHead; i <= oldTail; i++) {
+        if ((oldKey = oldVKids[i].key) != null) {
+          keyed[oldKey] = oldVKids[i]
+        }
+      }
+
+      while (newHead <= newTail) {
+        oldKey = getKey((oldVKid = oldVKids[oldHead]))
+        newKey = getKey(
+          (newVKids[newHead] = maybeVNode(newVKids[newHead], oldVKid))
+        )
+
+        if (
+          newKeyed[oldKey] ||
+          (newKey != null && newKey === getKey(oldVKids[oldHead + 1]))
+        ) {
+          if (oldKey == null) {
+            node.removeChild(oldVKid.node)
+          }
+          oldHead++
+          continue
+        }
+
+        if (newKey == null || oldVNode.tag === SSR_NODE) {
+          if (oldKey == null) {
+            patch(
+              node,
+              oldVKid && oldVKid.node,
+              oldVKid,
+              newVKids[newHead],
+              listener,
+              isSvg
+            )
+            newHead++
+          }
+          oldHead++
+        } else {
+          if (oldKey === newKey) {
+            patch(
+              node,
+              oldVKid.node,
+              oldVKid,
+              newVKids[newHead],
+              listener,
+              isSvg
+            )
+            newKeyed[newKey] = true
+            oldHead++
+          } else {
+            if ((tmpVKid = keyed[newKey]) != null) {
+              patch(
+                node,
+                node.insertBefore(tmpVKid.node, oldVKid && oldVKid.node),
+                tmpVKid,
+                newVKids[newHead],
+                listener,
+                isSvg
+              )
+              newKeyed[newKey] = true
+            } else {
+              patch(
+                node,
+                oldVKid && oldVKid.node,
+                null,
+                newVKids[newHead],
+                listener,
+                isSvg
+              )
+            }
+          }
+          newHead++
+        }
+      }
+
+      while (oldHead <= oldTail) {
+        if (getKey((oldVKid = oldVKids[oldHead++])) == null) {
+          node.removeChild(oldVKid.node)
+        }
+      }
+
+      for (var i in keyed) {
+        if (newKeyed[i] == null) {
+          node.removeChild(keyed[i].node)
+        }
+      }
+    }
+  }
+
+  return (newVNode.node = node)
+}
+
+var propsChanged = (a, b) => {
+  for (var k in a) if (a[k] !== b[k]) return true
+  for (var k in b) if (a[k] !== b[k]) return true
+}
+
+var maybeVNode = (newVNode, oldVNode) =>
+  newVNode !== true && newVNode !== false && newVNode
+    ? typeof newVNode.tag === "function"
+      ? ((!oldVNode ||
+          oldVNode.memo == null ||
+          propsChanged(oldVNode.memo, newVNode.memo)) &&
+          ((oldVNode = newVNode.tag(newVNode.memo)).memo = newVNode.memo),
+        oldVNode)
+      : newVNode
+    : text("")
+
+var recycleNode = (node) =>
+  node.nodeType === TEXT_NODE
+    ? text(node.nodeValue, node)
+    : createVNode(
+        node.nodeName.toLowerCase(),
+        EMPTY_OBJ,
+        map.call(node.childNodes, recycleNode),
+        node,
+        null,
+        SSR_NODE
+      )
+
+var createVNode = (type, props, children, node, key, tag) => ({
+  type,
+  props,
+  children,
+  node,
+  key,
+  tag,
+})
+
+var memo = (tag, memo) => ({ tag, memo })
+
+var text = (value, node) =>
+  createVNode(value, EMPTY_OBJ, EMPTY_ARR, node, null, TEXT_NODE)
+
+var h = (type, props, children) =>
+  createVNode(
+    type,
+    props,
+    isArray(children) ? children : children == null ? EMPTY_ARR : [children],
+    null,
+    props.key
+  )
+
+var app = (props) => {
+  var view = props.view
+  var node = props.node
+  var subscriptions = props.subscriptions
+  var vdom = node && recycleNode(node)
+  var subs = []
+  var doing
+  var state
+
+  var setState = (newState) => {
+    if (state !== newState) {
+      state = newState
+      if (subscriptions) {
+        subs = patchSubs(subs, subscriptions(state), dispatch)
+      }
+      if (view && !doing) enqueue(render, (doing = true))
+    }
+  }
+
+  var dispatch = (props.middleware || id)((action, props) =>
+    typeof action === "function"
+      ? dispatch(action(state, props))
+      : isArray(action)
+      ? typeof action[0] === "function"
+        ? dispatch(action[0], action[1])
+        : action
+            .slice(1)
+            .map(
+              (fx) => fx && fx !== true && fx[0](dispatch, fx[1]),
+              setState(action[0])
+            )
+      : setState(action)
+  )
+
+  var listener = function (event) {
+    dispatch(this.tag[event.type], event)
+  }
+
+  var render = () =>
+    (node = patch(
+      node.parentNode,
+      node,
+      vdom,
+      (vdom = view(state)),
+      listener,
+      (doing = false)
+    ))
+
+  dispatch(props.init)
+}
 
 
 /*
@@ -438,12 +781,8 @@ let profileNode = document.querySelector("div.js-modals-container");
 
 // MODEL
 
-let user = state("");
 // making the model depend on the storage variables
 // so we alter the storage variables and the model changes
-let block_replies = state(() => user() in storage.retweetBlacklist);
-let media_only = state(() => user() in storage.mediaOnlyUsers);
-let no_retweet = state(() => user() in storage.noRetweet);
 
 function get_profile_user() {
     if ( (!profileNode) || profileNode.children.length == 0) return "";
@@ -478,16 +817,6 @@ function addToMediaOnly(){
 function removeFromMediaOnly() {
     genericRemove(storage.mediaOnlyUsers);
     console.log("Unblocked text only posts from ", user());
-}
-
-function addToBlacklist(){
-    genericAdd(storage.retweetBlacklist);
-    console.log("Added user", user(), "to blacklist");
-}
-
-function removeFromBlacklist() {
-    genericRemove(storage.retweetBlacklist);
-    console.log("Removed user", user(), "from blacklist");
 }
 
 function blockRetweet(){
@@ -525,11 +854,11 @@ function generic_button (state_function, yes_text, no_text, yes_fn, no_fn) {
 // when a function is passed to state, state will execute the function to get an initial value.
 // executing button() will also execute the function
 // so i passed a function just to be able to pass arguments to generic_button
-let button_block_replies = state(() => generic_button(block_replies, "Unblock replies and retweets", "Block replies and retweets", removeFromBlacklist, addToBlacklist));
-let button_media_only = state(() => generic_button(media_only, "Unblock text posts", "Block text posts", removeFromMediaOnly, addToMediaOnly));
-let button_no_retweet = state(() => generic_button(no_retweet, "Unblock from retweeting", "Block from retweeting", unblockRetweet, blockRetweet));
+//let button_block_replies = state(() => generic_button(block_replies, "Unblock replies and self retweets", "Block replies and self retweets", removeFromBlacklist, addToBlacklist));
+//let button_media_only = state(() => generic_button(media_only, "Unblock text posts", "Block text posts", removeFromMediaOnly, addToMediaOnly));
+//let button_no_retweet = state(() => generic_button(no_retweet, "Unblock from retweeting", "Block from retweeting", unblockRetweet, blockRetweet));
 
-let buttons = [button_block_replies, button_media_only, button_no_retweet];
+//let buttons = [button_block_replies, button_media_only, button_no_retweet];
 
 // APP
 
@@ -545,13 +874,6 @@ function add_div_profile () {
     return div;
 };
 
-function app () {
-    let div = document.querySelector("div#tweetdeck-suite");
-    if (!div) return;
-    initialize_model();
-    div.textContent = "";
-    buttons.forEach (button => div.append(button()));
-}
 
 function initialize_profile () {
     add_div_profile();
@@ -561,4 +883,50 @@ function initialize_profile () {
 // refresh is the app which is a function that sets the content of the div to the view. the app updates by recalling the function
 var refresh = app;
 
-new MutationObserver(initialize_profile).observe(profileNode, { childList: true});
+
+
+const flipBlacklist = (state) => {
+    if (user in state.retweetBlacklist) {
+        delete(state.retweetBlacklist[user]);
+        state.text_block_replies = button_texts.block_replies[0];
+        console.log("Added user", user, "to blacklist");
+    }
+    else {
+        state.retweetBlacklist[user] = "";
+        state.text_block_replies = button_texts.block_replies[1];
+        console.log("Removed user", user, "from blacklist");
+    }
+    updateStorage();
+    return state;
+}
+
+function removeFromBlacklist(state) {
+    console.log("Removed user", user, "from blacklist");
+    return
+}
+
+let user = "";
+let button_texts = {
+    block_replies : ["Remove from blacklist", "Add to blacklist"]
+}
+
+let appaaaa = "";
+
+function initializeApp () {
+    add_div_profile();
+    user = get_profile_user();
+    if (user == "") return;
+
+    appaaaa = app({
+    init: {...storage,
+               text_block_replies : button_texts.block_replies[user in storage.retweetBlacklist ? 1 : 0]
+          },
+    view: ({ retweetBlacklist, text_block_replies}) =>
+    h("main", {}, [
+        h("button", {onclick: flipBlacklist}, text(text_block_replies))
+    ]),
+    node: document.getElementById("tweetdeck-suite"),
+})
+}
+
+new MutationObserver(initializeApp).observe(profileNode, { childList: true});
