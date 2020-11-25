@@ -11,17 +11,27 @@
 // @grant           GM_setValue
 // ==/UserScript==
 
-/* INSTRUCTIONS
+/*
+Instructions
 
 Self retweets are blocked by default
+Click on a user on tweetdeck to access the user profile. The buttons to block and unblock will be there.
 
-Click on a user on tweetdeck to access the user profile. The button to add or remove from lists will be there.
+Features
+
+- Self retweets are blocked by default. PS: a "self retweet" is when a user retweets posts of themselves.
+- Hide when someone retweets or replies to this account, and also when the account replies to someone else. For now, both features at not separated. The idea is to stop situations where a group of users retweet and reply to each other.
+- Hide text posts per user (show media posts only).
+- Hide retweets per user. Useful when you like someone's original content but not their retweets. Very useful when an account keeps retweeting their other accounts.
+
+- Implemented but no button yet: hide retweets containing a word per user. Useful mostly for blocking the user from making propaganda for youtube channels for example.
 
 You can see and modify the full list of users by doing this:
 
 1) Access tweetdeck.
 2) Click on tampermonkey icon, right click on the script to access the page where you edit the script. Go to the Storage tab of the script and include the accounts you would like to not see retweets of. The storage tab is only visible if you have the advanced settings turned on inside of Tampermonkey.
 3) Click save.
+
 You can check which tweets are being removed in the console in the developer tools of your browser.
 In Firefox: Ctrl Shift K
 In Chrome: Ctrl Shift J
